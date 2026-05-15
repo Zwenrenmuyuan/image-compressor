@@ -2,6 +2,12 @@
 
 纯前端本地图片压缩工具，支持 JPG、PNG 和 WebP 导出。图片只在浏览器本地处理，不会上传到服务器。
 
+## 在线体验
+
+```text
+https://zwenrenmuyuanzyj.me/image-compressor/
+```
+
 ## 本地运行
 
 ```bash
@@ -30,4 +36,22 @@ npm run build
 
 ```text
 https://你的用户名.github.io/image-compressor/
+```
+
+如果你的用户主页 `你的用户名.github.io` 已经绑定了 GitHub Pages 自定义域名，项目页通常会自动映射到自定义域名下。例如：
+
+```text
+https://你的用户名.github.io/image-compressor/
+```
+
+会变成：
+
+```text
+https://你的自定义域名/image-compressor/
+```
+
+这是 GitHub Pages 的正常行为，不需要额外修改项目代码。当前项目的体验地址就是这种情况：
+
+```text
+https://zwenrenmuyuanzyj.me/image-compressor/
 ```
