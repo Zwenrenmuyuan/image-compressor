@@ -32,6 +32,15 @@ type CompressionResult = {
   outputName: string;
 };
 
+type CompressionOutcome =
+  | {
+      status: "done";
+      originalSize: number;
+      outputSize: number;
+    }
+  | { status: "error" }
+  | { status: "skipped" };
+
 const formatOptions: Array<{ label: string; value: OutputFormat; helper: string }> = [
   {
     label: "JPG",
@@ -63,8 +72,9 @@ function App() {
   const [maxWidth, setMaxWidth] = useState("1920");
   const [maxHeight, setMaxHeight] = useState("1920");
   const [isDragging, setIsDragging] = useState(false);
-  const [message, setMessage] = useState("选择图片后会在浏览器本地压缩，不会上传到服务器。");
+  const [toastMessage, setToastMessage] = useState("");
   const itemsRef = useRef<ImageItem[]>([]);
+  const toastTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     itemsRef.current = items;
@@ -72,6 +82,9 @@ function App() {
 
   useEffect(() => {
     return () => {
+      if (toastTimeoutRef.current) {
+        window.clearTimeout(toastTimeoutRef.current);
+      }
       itemsRef.current.forEach(releaseItemUrls);
     };
   }, []);
@@ -103,7 +116,7 @@ function App() {
     const imageFiles = Array.from(fileList ?? []).filter((file) => file.type.startsWith("image/"));
 
     if (imageFiles.length === 0) {
-      setMessage("没有找到可处理的图片文件。请选择 JPG、PNG 或 WebP 图片。");
+      showToast("没有找到可处理的图片文件。请选择 JPG、PNG 或 WebP 图片。");
       return;
     }
 
@@ -116,14 +129,14 @@ function App() {
     }));
 
     setItems((current) => [...newItems, ...current]);
-    setMessage(`已添加 ${newItems.length} 张图片，正在压缩。`);
 
-    await Promise.all(newItems.map((item) => compressAndStore(item, settings)));
+    const outcomes = await Promise.all(newItems.map((item) => compressAndStore(item, settings)));
+    showToast(makeCompletionMessage(outcomes));
   }
 
   async function recompressAll() {
     if (items.length === 0) {
-      setMessage("先添加图片，再重新压缩。");
+      showToast("先添加图片，再重新压缩。");
       return;
     }
 
@@ -144,18 +157,21 @@ function App() {
     }));
 
     setItems(queuedItems);
-    setMessage("正在使用当前参数重新压缩全部图片。");
 
-    await Promise.all(queuedItems.map((item) => compressAndStore(item, settings)));
+    const outcomes = await Promise.all(queuedItems.map((item) => compressAndStore(item, settings)));
+    showToast(makeCompletionMessage(outcomes));
   }
 
-  async function compressAndStore(item: ImageItem, currentSettings: CompressionSettings) {
+  async function compressAndStore(
+    item: ImageItem,
+    currentSettings: CompressionSettings,
+  ): Promise<CompressionOutcome> {
     try {
       const result = await compressImage(item.file, currentSettings);
 
       if (!itemsRef.current.some((currentItem) => currentItem.id === item.id)) {
         URL.revokeObjectURL(result.outputUrl);
-        return;
+        return { status: "skipped" };
       }
 
       setItems((current) =>
@@ -174,6 +190,11 @@ function App() {
             : currentItem,
         ),
       );
+      return {
+        status: "done",
+        originalSize: item.originalSize,
+        outputSize: result.outputBlob.size,
+      };
     } catch (error) {
       setItems((current) =>
         current.map((currentItem) =>
@@ -186,6 +207,7 @@ function App() {
             : currentItem,
         ),
       );
+      return { status: "error" };
     }
   }
 
@@ -202,7 +224,7 @@ function App() {
   function clearAll() {
     items.forEach(releaseItemUrls);
     setItems([]);
-    setMessage("已清空图片列表。");
+    showToast("已清空图片列表。");
   }
 
   function downloadItem(item: ImageItem) {
@@ -216,19 +238,57 @@ function App() {
     anchor.click();
   }
 
+  function showToast(nextMessage: string) {
+    if (toastTimeoutRef.current) {
+      window.clearTimeout(toastTimeoutRef.current);
+    }
+
+    setToastMessage(nextMessage);
+    toastTimeoutRef.current = window.setTimeout(() => {
+      setToastMessage("");
+      toastTimeoutRef.current = null;
+    }, 1500);
+  }
+
   return (
     <main className="shell">
       <section className="hero">
         <div>
-          <p className="eyebrow">Local Image Compressor</p>
+          <div className="hero-meta">
+            <p className="eyebrow">Local Image Compressor</p>
+            <a
+              className="repo-link"
+              href="https://github.com/Zwenrenmuyuan/image-compressor"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="打开 GitHub 项目地址"
+              title="GitHub 项目地址"
+            >
+              <span className="repo-icon" aria-hidden="true" />
+            </a>
+          </div>
           <h1>图片压缩工具</h1>
           <p className="hero-copy">
             批量压缩 JPG、PNG 和 WebP 图片。所有处理都在浏览器本地完成，图片不会离开你的电脑。
           </p>
         </div>
-        <div className="privacy-card">
-          <span>本地处理</span>
-          <strong>0 上传</strong>
+        <div className="summary hero-summary">
+          <div>
+            <span>图片数量</span>
+            <strong>{items.length}</strong>
+          </div>
+          <div>
+            <span>已完成</span>
+            <strong>{completedCount}</strong>
+          </div>
+          <div>
+            <span>原始体积</span>
+            <strong>{formatBytes(totalOriginal)}</strong>
+          </div>
+          <div>
+            <span>压缩后</span>
+            <strong>{formatBytes(totalOutput)}</strong>
+          </div>
         </div>
       </section>
 
@@ -320,30 +380,9 @@ function App() {
               清空
             </button>
           </div>
-
-          <p className="message">{message}</p>
         </aside>
 
         <section className="panel results">
-          <div className="summary">
-            <div>
-              <span>图片数量</span>
-              <strong>{items.length}</strong>
-            </div>
-            <div>
-              <span>已完成</span>
-              <strong>{completedCount}</strong>
-            </div>
-            <div>
-              <span>原始体积</span>
-              <strong>{formatBytes(totalOriginal)}</strong>
-            </div>
-            <div>
-              <span>压缩后</span>
-              <strong>{formatBytes(totalOutput)}</strong>
-            </div>
-          </div>
-
           {items.length === 0 ? (
             <div className="empty-state">
               <strong>还没有图片</strong>
@@ -403,6 +442,12 @@ function App() {
           )}
         </section>
       </section>
+
+      {toastMessage && (
+        <div className="toast" role="status" aria-live="polite">
+          {toastMessage}
+        </div>
+      )}
     </main>
   );
 }
@@ -513,6 +558,25 @@ function formatDelta(originalSize: number, outputSize: number) {
     return `小 ${percent.toFixed(1)}%`;
   }
   return `大 ${Math.abs(percent).toFixed(1)}%`;
+}
+
+function makeCompletionMessage(outcomes: CompressionOutcome[]) {
+  const completed = outcomes.filter(
+    (outcome): outcome is Extract<CompressionOutcome, { status: "done" }> => outcome.status === "done",
+  );
+  const errorCount = outcomes.filter((outcome) => outcome.status === "error").length;
+
+  if (completed.length === 0) {
+    return errorCount > 0 ? "处理失败：没有图片成功压缩，请检查图片格式后重试。" : "没有需要处理的图片。";
+  }
+
+  const originalSize = completed.reduce((sum, outcome) => sum + outcome.originalSize, 0);
+  const outputSize = completed.reduce((sum, outcome) => sum + outcome.outputSize, 0);
+  const percent = ((originalSize - outputSize) / originalSize) * 100;
+  const change = percent >= 0 ? `减少 ${percent.toFixed(1)}%` : `增加 ${Math.abs(percent).toFixed(1)}%`;
+  const errorText = errorCount > 0 ? `，${errorCount} 张失败` : "";
+
+  return `处理完成：${completed.length} 张图片从 ${formatBytes(originalSize)} 压到 ${formatBytes(outputSize)}，${change}${errorText}。`;
 }
 
 function makeOutputName(fileName: string, format: OutputFormat) {
