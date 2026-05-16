@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ChangeEvent, DragEvent } from "react";
+import type { ChangeEvent, DragEvent, KeyboardEvent } from "react";
 
 type OutputFormat = "image/jpeg" | "image/png" | "image/webp";
 
@@ -41,21 +41,29 @@ type CompressionOutcome =
   | { status: "error" }
   | { status: "skipped" };
 
-const formatOptions: Array<{ label: string; value: OutputFormat; helper: string }> = [
+const formatOptions: Array<{
+  label: string;
+  value: OutputFormat;
+  helper: string;
+  note: string;
+}> = [
   {
     label: "JPG",
     value: "image/jpeg",
     helper: "兼容性最好，适合照片，不支持透明背景。",
+    note: "照片优先",
   },
   {
     label: "PNG",
     value: "image/png",
     helper: "保留透明和清晰边缘，但压缩幅度通常较小。",
+    note: "保留透明",
   },
   {
     label: "WebP",
     value: "image/webp",
     helper: "网页常见，体积通常更小，也支持透明。",
+    note: "网页友好",
   },
 ];
 
@@ -310,18 +318,16 @@ function App() {
           </label>
 
           <div className="control-group">
-            <label htmlFor="format">导出格式</label>
-            <select
+            <label id="format-label" htmlFor="format">
+              导出格式
+            </label>
+            <FormatDropdown
               id="format"
               value={format}
-              onChange={(event) => setFormat(event.currentTarget.value as OutputFormat)}
-            >
-              {formatOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+              labelId="format-label"
+              options={formatOptions}
+              onChange={setFormat}
+            />
             <p className="hint">{formatHelper}</p>
           </div>
 
@@ -348,28 +354,18 @@ function App() {
           </div>
 
           <div className="dimension-grid">
-            <div className="control-group">
-              <label htmlFor="maxWidth">最大宽度</label>
-              <input
-                id="maxWidth"
-                type="number"
-                min="1"
-                placeholder="不限"
-                value={maxWidth}
-                onChange={(event) => setMaxWidth(event.currentTarget.value)}
-              />
-            </div>
-            <div className="control-group">
-              <label htmlFor="maxHeight">最大高度</label>
-              <input
-                id="maxHeight"
-                type="number"
-                min="1"
-                placeholder="不限"
-                value={maxHeight}
-                onChange={(event) => setMaxHeight(event.currentTarget.value)}
-              />
-            </div>
+            <DimensionField
+              id="maxWidth"
+              label="最大宽度"
+              value={maxWidth}
+              onChange={setMaxWidth}
+            />
+            <DimensionField
+              id="maxHeight"
+              label="最大高度"
+              value={maxHeight}
+              onChange={setMaxHeight}
+            />
           </div>
 
           <div className="button-row">
@@ -449,6 +445,206 @@ function App() {
         </div>
       )}
     </main>
+  );
+}
+
+type FormatDropdownProps = {
+  id: string;
+  labelId: string;
+  options: typeof formatOptions;
+  value: OutputFormat;
+  onChange: (value: OutputFormat) => void;
+};
+
+function FormatDropdown({ id, labelId, options, value, onChange }: FormatDropdownProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const selectedIndex = Math.max(
+    0,
+    options.findIndex((option) => option.value === value),
+  );
+  const selectedOption = options[selectedIndex];
+
+  useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, []);
+
+  function focusOption(index: number) {
+    window.requestAnimationFrame(() => {
+      optionRefs.current[index]?.focus();
+    });
+  }
+
+  function openMenu() {
+    setIsOpen(true);
+    focusOption(selectedIndex);
+  }
+
+  function closeMenu(shouldFocusTrigger = false) {
+    setIsOpen(false);
+
+    if (shouldFocusTrigger) {
+      window.requestAnimationFrame(() => {
+        triggerRef.current?.focus();
+      });
+    }
+  }
+
+  function selectOption(nextValue: OutputFormat) {
+    onChange(nextValue);
+    closeMenu(true);
+  }
+
+  function handleTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      openMenu();
+    }
+  }
+
+  function handleOptionKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusOption((index + 1) % options.length);
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusOption((index - 1 + options.length) % options.length);
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault();
+      focusOption(0);
+    }
+
+    if (event.key === "End") {
+      event.preventDefault();
+      focusOption(options.length - 1);
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeMenu(true);
+    }
+
+    if (event.key === "Tab") {
+      closeMenu();
+    }
+  }
+
+  return (
+    <div className={isOpen ? "format-select is-open" : "format-select"} ref={rootRef}>
+      <button
+        id={id}
+        ref={triggerRef}
+        type="button"
+        className="format-select-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-labelledby={`${labelId} ${id}-value`}
+        onClick={() => setIsOpen((current) => !current)}
+        onKeyDown={handleTriggerKeyDown}
+      >
+        <span id={`${id}-value`}>{selectedOption.label}</span>
+        <span className="format-select-chevron" aria-hidden="true" />
+      </button>
+
+      {isOpen && (
+        <div className="format-select-menu" role="listbox" aria-labelledby={labelId}>
+          {options.map((option, index) => (
+            <button
+              key={option.value}
+              ref={(node) => {
+                optionRefs.current[index] = node;
+              }}
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              className={
+                option.value === value
+                  ? "format-select-option is-selected"
+                  : "format-select-option"
+              }
+              onClick={() => selectOption(option.value)}
+              onKeyDown={(event) => handleOptionKeyDown(event, index)}
+            >
+              <span>{option.label}</span>
+              <small>{option.note}</small>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type DimensionFieldProps = {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+};
+
+function DimensionField({ id, label, value, onChange }: DimensionFieldProps) {
+  const min = 1;
+  const parsedValue = parseSizeLimit(value);
+  const canDecrease = parsedValue !== null && parsedValue > min;
+
+  function increaseValue() {
+    onChange(String(parsedValue === null ? min : parsedValue + 1));
+  }
+
+  function decreaseValue() {
+    if (!canDecrease || parsedValue === null) {
+      return;
+    }
+
+    onChange(String(parsedValue - 1));
+  }
+
+  return (
+    <div className="control-group">
+      <label htmlFor={id}>{label}</label>
+      <div className="number-field">
+        <input
+          id={id}
+          type="number"
+          min={min}
+          step="1"
+          placeholder="不限"
+          value={value}
+          onChange={(event) => onChange(event.currentTarget.value)}
+        />
+        <div className="number-stepper">
+          <button
+            type="button"
+            className="number-stepper-button is-up"
+            aria-label={`增加${label}`}
+            onClick={increaseValue}
+          />
+          <button
+            type="button"
+            className="number-stepper-button is-down"
+            aria-label={`减少${label}`}
+            onClick={decreaseValue}
+            disabled={!canDecrease}
+          />
+        </div>
+      </div>
+    </div>
   );
 }
 
